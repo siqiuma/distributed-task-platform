@@ -1,0 +1,17 @@
+# Maven
+target/
+!.mvn/wrapper/maven-wrapper.jar
+
+# IntelliJ
+.idea/
+*.iml
+out/
+
+# Mac
+.DS_Store
+
+# Logs
+*.log
+
+# Env files
+.env
