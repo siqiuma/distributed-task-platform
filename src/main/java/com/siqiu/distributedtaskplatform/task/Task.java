@@ -61,4 +61,32 @@ public class Task {
         }
         this.status = TaskStatus.CANCELED;
     }
+
+    public void markProcessing() {
+        if (this.status != TaskStatus.PENDING) {
+            throw new InvalidTaskStateException(
+                    "Cannot process task in state " + status
+            );
+        }
+        this.status = TaskStatus.PROCESSING;
+    }
+
+    public void markSucceeded() {
+        if (this.status != TaskStatus.PROCESSING) {
+            throw new InvalidTaskStateException(
+                    "Cannot succeed task in state " + status
+            );
+        }
+        this.status = TaskStatus.SUCCEEDED;
+    }
+
+    public void markFailed() {
+        if (this.status != TaskStatus.PROCESSING) {
+            throw new InvalidTaskStateException(
+                    "Cannot fail task in state " + status
+            );
+        }
+        this.status = TaskStatus.FAILED;
+    }
+
 }
