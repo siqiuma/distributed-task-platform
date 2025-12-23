@@ -1,5 +1,6 @@
 package com.siqiu.distributedtaskplatform.task;
 
+import org.springframework.orm.ObjectOptimisticLockingFailureException;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
@@ -13,9 +14,12 @@ public class TaskWorker {
     private static final Logger log = LoggerFactory.getLogger(TaskWorker.class);
 
     private final TaskRepository repository;
+    private final TaskWorkerTx tx; // helper transactional bean
 
-    public TaskWorker(TaskRepository repository) {
+
+    public TaskWorker(TaskRepository repository, TaskWorkerTx tx) {
         this.repository = repository;
+        this.tx = tx;
     }
 
     /*
@@ -24,35 +28,43 @@ public class TaskWorker {
      */
     //Run this method automatically, in the background, over and over.
     //There is no HTTP request, no user trigger, no controller involved.
+
     @Scheduled(fixedDelay = 5000)
-    @Transactional
     public void processPendingTasks() {
-        List<Task> tasks =
-                repository.findTop5ByStatusOrderByCreatedAt(TaskStatus.PENDING);
+        List<Task> tasks = repository.findTop5ByStatusOrderByCreatedAt(TaskStatus.PENDING);
+        if (tasks.isEmpty()) return;
 
-        if (tasks.isEmpty()) {
-            log.debug("No pending tasks found");
-            return;
-        }
+        for (Task t : tasks) {
+            Long id = t.getId();
 
-        for (Task task : tasks) {
+            // 1) claim fast (short tx)
+            boolean claimed = tx.claim(id);
+            if (!claimed) continue;
+
+            // 2) do work OUTSIDE tx
             try {
-                log.info("Processing task id={}", task.getId());
+                // Re-read a fresh copy after claim (short tx)
+                String payload = tx.getPayload(id);
 
-                task.markProcessing();
+                log.info("Processing task id={}", id);
+                Thread.sleep(3000); // simulate work
 
-                // Simulate work
-                Thread.sleep(1000);
-                // Simulate work
-                if (task.getPayload().contains("fail")) {
-                    throw new RuntimeException("Simulated failure");
+                if (payload != null && payload.contains("fail")) {
+                    tx.markFailed(id);
+                    log.info("Task id={} failed (simulated)", id);
+                } else {
+                    tx.markSucceeded(id);
+                    log.info("Task id={} succeeded", id);
                 }
-
-                task.markSucceeded();
-                log.info("Task id={} succeeded", task.getId());
+            } catch (org.springframework.orm.ObjectOptimisticLockingFailureException e) {
+                log.warn("Optimistic lock conflict for task id={}, skipping", id);
             } catch (Exception e) {
-                task.markFailed();
-                log.error("Task id={} failed", task.getId(), e);
+                log.error("Unexpected error while processing task id={}", id, e);
+                try {
+                    tx.markFailed(id);
+                } catch (org.springframework.orm.ObjectOptimisticLockingFailureException ignored) {
+                    log.warn("Optimistic lock while marking failed for task id={}, skipping", id);
+                }
             }
         }
     }

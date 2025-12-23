@@ -14,8 +14,8 @@ public class Task {
     @Column(nullable = false)
     private String type;
 
-    @Lob
-    @Column(nullable = false)
+//    @Lob
+    @Column(nullable = false, columnDefinition = "TEXT")
     private String payload;
 
     @Enumerated(EnumType.STRING)
@@ -26,6 +26,17 @@ public class Task {
     private Instant createdAt = Instant.now();
 
     private Instant updatedAt;
+/*JPA now does this behind the scenes:
+* Reads task with version = 1
+* On update, executes:
+UPDATE task
+SET status=?, version=version+1
+WHERE id=? AND version=1
+* If 0 rows updated → someone else modified it → conflict detected
+*This turns silent corruption into a detectable failure.
+* Conflicts will throw OptimisticLockException*/
+    @Version
+    private Long version;
 
     protected Task() {}
 
