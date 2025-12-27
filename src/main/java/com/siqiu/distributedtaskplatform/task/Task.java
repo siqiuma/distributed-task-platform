@@ -2,6 +2,8 @@ package com.siqiu.distributedtaskplatform.task;
 
 import jakarta.persistence.*;
 import java.time.Instant;
+import java.time.Duration;
+
 
 @Entity
 @Table(name = "tasks")
@@ -26,6 +28,17 @@ public class Task {
     private Instant createdAt = Instant.now();
 
     private Instant updatedAt;
+
+    @Column(nullable = false)
+    private int attemptCount = 0;
+
+    @Column(nullable = false)
+    private int maxAttempts = 3;
+
+    private Instant nextRunAt;
+
+    @Column(name = "last_error", columnDefinition = "text")
+    private String lastError;
 /*JPA now does this behind the scenes:
 * Reads task with version = 1
 * On update, executes:
@@ -59,6 +72,10 @@ WHERE id=? AND version=1
     public TaskStatus getStatus() { return status; }
     public Instant getCreatedAt() { return createdAt; }
     public Instant getUpdatedAt() { return updatedAt; }
+    public int getAttemptCount() { return attemptCount; }
+    public int getMaxAttempts() { return maxAttempts; }
+    public Instant getNextRunAt() { return nextRunAt; }
+    public String getLastError() { return lastError; }
 
     public void setStatus(TaskStatus status) {
         this.status = status;
@@ -74,11 +91,20 @@ WHERE id=? AND version=1
     }
 
     public void markProcessing() {
-        if (this.status != TaskStatus.PENDING) {
+        if (this.status != TaskStatus.PENDING && this.status != TaskStatus.FAILED) {
             throw new InvalidTaskStateException(
                     "Cannot process task in state " + status
             );
         }
+        if (this.attemptCount >= this.maxAttempts) {
+            throw new InvalidTaskStateException("Max retry attempts exceeded");
+        }
+
+        this.attemptCount++;       // increment ON ATTEMPT
+        // New attempt is starting: clear old error + clear schedule
+        this.lastError = null;
+        this.nextRunAt = null;
+
         this.status = TaskStatus.PROCESSING;
     }
 
@@ -91,13 +117,28 @@ WHERE id=? AND version=1
         this.status = TaskStatus.SUCCEEDED;
     }
 
-    public void markFailed() {
+    public void markFailed(String errorMessage, Duration backoff) {
         if (this.status != TaskStatus.PROCESSING) {
             throw new InvalidTaskStateException(
                     "Cannot fail task in state " + status
             );
         }
-        this.status = TaskStatus.FAILED;
+
+        // Store the error so we can inspect/debug later
+        this.lastError = (errorMessage == null || errorMessage.isBlank())
+                ? "Unknown error"
+                : errorMessage;
+
+        // Decide whether it should retry
+        if (this.attemptCount < this.maxAttempts) {
+            // Keep FAILED status but schedule for retry
+            this.status = TaskStatus.FAILED;
+            this.nextRunAt = Instant.now().plus(backoff);
+        } else {
+            // No more retries; terminal failure
+            this.status = TaskStatus.DEAD;
+            this.nextRunAt = null;
+        }
     }
 
 }

@@ -4,6 +4,7 @@ public enum TaskStatus {
     PENDING,
     PROCESSING,
     SUCCEEDED,
-    FAILED,
+    FAILED, // retryable
+    DEAD,  // terminal failure (no retries)
     CANCELED
 }

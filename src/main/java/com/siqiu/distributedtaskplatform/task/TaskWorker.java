@@ -5,6 +5,7 @@ import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.Instant;
 import java.util.List;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -31,27 +32,34 @@ public class TaskWorker {
 
     @Scheduled(fixedDelay = 5000)
     public void processPendingTasks() {
-        List<Task> tasks = repository.findTop5ByStatusOrderByCreatedAt(TaskStatus.PENDING);
-        if (tasks.isEmpty()) return;
+        Instant now = Instant.now();
+
+        List<Task> tasks = repository.findTop5Eligible(
+                now,
+                org.springframework.data.domain.PageRequest.of(0, 5)
+        );
 
         for (Task t : tasks) {
             Long id = t.getId();
 
             // 1) claim fast (short tx)
             boolean claimed = tx.claim(id);
-            if (!claimed) continue;
+            if (!claimed) {
+                log.info("Task id={} already claimed/not eligible, skipping", id);
+                continue;
+            }
 
             // 2) do work OUTSIDE tx
             try {
                 // Re-read a fresh copy after claim (short tx)
                 String payload = tx.getPayload(id);
 
-                log.info("Processing task id={}", id);
+                log.info("Processing task id={} payload={}", id, payload);
                 Thread.sleep(3000); // simulate work
 
                 if (payload != null && payload.contains("fail")) {
-                    tx.markFailed(id);
                     log.info("Task id={} failed (simulated)", id);
+                    throw new RuntimeException("Simulated failure");
                 } else {
                     tx.markSucceeded(id);
                     log.info("Task id={} succeeded", id);
@@ -61,7 +69,8 @@ public class TaskWorker {
             } catch (Exception e) {
                 log.error("Unexpected error while processing task id={}", id, e);
                 try {
-                    tx.markFailed(id);
+                    tx.markFailed(id,e);
+                    log.warn("Task id={} failed, scheduled retry (if attempts remain)", id, e);
                 } catch (org.springframework.orm.ObjectOptimisticLockingFailureException ignored) {
                     log.warn("Optimistic lock while marking failed for task id={}, skipping", id);
                 }
