@@ -34,6 +34,11 @@ public class TaskWorker {
 
     @Scheduled(fixedDelay = 5000)
     public void processPendingTasks() {
+        runOnce();
+    }
+
+    // package-private so tests in same package can call it
+    void runOnce() {
         Instant now = Instant.now();
 
         List<Task> tasks = repository.findTop5Eligible(

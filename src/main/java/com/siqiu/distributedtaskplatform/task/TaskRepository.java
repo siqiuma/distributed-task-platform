@@ -40,4 +40,8 @@ public interface TaskRepository extends JpaRepository<Task, Long> {
 //Pageable: To ensure queries return bounded result sets.
 // It translates to LIMIT/OFFSET at the SQL level,
 // preventing large result scans and keeping worker processing efficient.
+
+    @Modifying
+    @Query("update Task t set t.nextRunAt = :nextRunAt where t.id = :id")
+    int updateNextRunAt(@Param("id") Long id, @Param("nextRunAt") Instant nextRunAt);
 }
