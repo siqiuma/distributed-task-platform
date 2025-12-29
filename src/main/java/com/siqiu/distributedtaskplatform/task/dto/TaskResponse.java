@@ -2,9 +2,11 @@ package com.siqiu.distributedtaskplatform.task.dto;
 
 import com.siqiu.distributedtaskplatform.task.Task;
 import com.siqiu.distributedtaskplatform.task.TaskStatus;
+import lombok.Getter;
 
 import java.time.Instant;
 
+@Getter
 public class TaskResponse {
 
     private Long id;

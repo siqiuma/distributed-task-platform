@@ -1,5 +1,6 @@
 package com.siqiu.distributedtaskplatform.task;
 
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.orm.ObjectOptimisticLockingFailureException;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
@@ -11,6 +12,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 @Component
+@ConditionalOnProperty(name = "task.worker.enabled", havingValue = "true", matchIfMissing = true)
 public class TaskWorker {
     private static final Logger log = LoggerFactory.getLogger(TaskWorker.class);
 
