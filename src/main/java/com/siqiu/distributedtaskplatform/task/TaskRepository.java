@@ -13,7 +13,7 @@ public interface TaskRepository extends JpaRepository<Task, Long> {
 
     //It tells Spring Data that the query performs an update or delete instead of a select,
     // so it executes it as a modifying query and returns the affected row count
-    @Modifying
+    @Modifying(clearAutomatically = true, flushAutomatically = true)
     @Query("""
     update Task t
        set t.status = com.siqiu.distributedtaskplatform.task.TaskStatus.PROCESSING,
