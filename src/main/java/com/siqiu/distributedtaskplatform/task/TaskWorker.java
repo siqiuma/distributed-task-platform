@@ -50,38 +50,75 @@ public class TaskWorker {
             Long id = t.getId();
 
             // 1) claim fast (short tx)
-            boolean claimed = tx.claim(id);
-            if (!claimed) {
-                log.info("Task id={} already claimed/not eligible, skipping", id);
+            TaskSnapshot claimed = tx.claimAndGetSnapshot(id);
+            if (claimed == null) {
+                log.info("task_skipped id={} reason=already_claimed_or_not_due", id);
                 continue;
             }
 
+            log.info("task_claimed id={} status={} attempt={} maxAttempts={}",
+                    claimed.id(), claimed.status(), claimed.attemptCount(), claimed.maxAttempts());
+
             // 2) do work OUTSIDE tx
+            Instant startedAt = Instant.now();
             try {
                 // Re-read a fresh copy after claim (short tx)
                 String payload = tx.getPayload(id);
 
-                log.info("Processing task id={} payload={}", id, payload);
+                log.info("task_processing_started id={} type={} payloadLen={}",
+                        id, claimed.type(), payload == null ? 0 : payload.length());
                 Thread.sleep(3000); // simulate work
 
                 if (payload != null && payload.contains("fail")) {
-                    log.info("Task id={} failed (simulated)", id);
-                    throw new RuntimeException("Simulated failure");
+                    log.warn("task_processing_simulated_failure id={}", id);
+                    throw new TaskProcessingException("Simulated failure");
                 } else {
-                    tx.markSucceeded(id);
-                    log.info("Task id={} succeeded", id);
+                    TaskSnapshot after = tx.markSucceeded(id);
+                    log.info("task_succeeded id={} status={} attempt={} durationMs={}",
+                            after.id(), after.status(), after.attemptCount(),
+                            java.time.Duration.between(startedAt, Instant.now()).toMillis());
+
                 }
             } catch (org.springframework.orm.ObjectOptimisticLockingFailureException e) {
-                log.warn("Optimistic lock conflict for task id={}, skipping", id);
+                log.warn("task_conflict_optimistic_lock id={} phase=processing durationMs={}",
+                        id, java.time.Duration.between(startedAt, Instant.now()).toMillis());
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                log.warn("task_interrupted id={} durationMs={}",
+                        id, java.time.Duration.between(startedAt, Instant.now()).toMillis());
+
+                tryMarkFailed(id, e);
             } catch (Exception e) {
-                log.error("Unexpected error while processing task id={}", id, e);
-                try {
-                    tx.markFailed(id,e);
-                    log.warn("Task id={} failed, scheduled retry (if attempts remain)", id, e);
-                } catch (org.springframework.orm.ObjectOptimisticLockingFailureException ignored) {
-                    log.warn("Optimistic lock while marking failed for task id={}, skipping", id);
+                boolean expected = (e instanceof TaskProcessingException);
+
+                if (expected) {
+                    log.warn("task_processing_failed_expected id={} errorClass={} msg={} durationMs={}",
+                            id, e.getClass().getSimpleName(), e.getMessage(),
+                            java.time.Duration.between(startedAt, Instant.now()).toMillis());
+                } else {
+                    log.error("task_processing_failed_unexpected id={} errorClass={} msg={} durationMs={}",
+                            id, e.getClass().getSimpleName(), e.getMessage(),
+                            java.time.Duration.between(startedAt, Instant.now()).toMillis(), e);
                 }
+
+                // ✅ important: always update retry state for any failure
+                tryMarkFailed(id, e);
             }
+
+        }
+    }
+
+    private void tryMarkFailed(Long id, Exception e) {
+        try {
+            TaskSnapshot after = tx.markFailed(id, e);
+            log.info("task_retry_state_updated id={} status={} attempt={} maxAttempts={} nextRunAt={} lastError={}",
+                    after.id(), after.status(), after.attemptCount(), after.maxAttempts(),
+                    after.nextRunAt(), after.lastError());
+        } catch (ObjectOptimisticLockingFailureException ex) {
+            log.warn("task_conflict_optimistic_lock id={} phase=markFailed", id);
+        } catch (Exception ex) {
+            log.error("task_markFailed_failed id={} errorClass={} msg={}",
+                    id, ex.getClass().getSimpleName(), ex.getMessage(), ex);
         }
     }
 }

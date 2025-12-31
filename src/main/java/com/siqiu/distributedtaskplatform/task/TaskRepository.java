@@ -9,8 +9,6 @@ import java.time.Instant;
 import java.util.List;
 
 public interface TaskRepository extends JpaRepository<Task, Long> {
-    List<Task> findTop5ByStatusOrderByCreatedAt(TaskStatus status);
-
     //It tells Spring Data that the query performs an update or delete instead of a select,
     // so it executes it as a modifying query and returns the affected row count
     @Modifying(clearAutomatically = true, flushAutomatically = true)
@@ -41,7 +39,12 @@ public interface TaskRepository extends JpaRepository<Task, Long> {
 // It translates to LIMIT/OFFSET at the SQL level,
 // preventing large result scans and keeping worker processing efficient.
 
-    @Modifying
-    @Query("update Task t set t.nextRunAt = :nextRunAt where t.id = :id")
-    int updateNextRunAt(@Param("id") Long id, @Param("nextRunAt") Instant nextRunAt);
+    @Query("""
+        select new com.siqiu.distributedtaskplatform.task.TaskSnapshot(
+            t.id, t.type, t.status, t.attemptCount, t.maxAttempts, t.nextRunAt, t.lastError
+        )
+        from Task t
+        where t.id = :id
+    """)
+    TaskSnapshot findSnapshotById(@Param("id") Long id);
 }
