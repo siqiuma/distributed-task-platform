@@ -1,0 +1,111 @@
+groups:
+  - name: dtp-worker
+    rules:
+      # Prometheus can't scrape the app
+      - alert: DtpTargetDown
+        expr: up{job="dtp"} == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "DTP target is down (cannot scrape metrics)"
+          description: "Prometheus has not been able to scrape {{ $labels.instance }} for 1m."
+
+      # Worker appears to be doing nothing (no processed tasks recently)
+      - alert: DtpWorkerNotProcessing
+        expr: rate(dtp_tasks_processed_total[10m]) == 0
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: "DTP worker is not processing tasks"
+          description: "No tasks processed in the last 10m (held for 15m). Check scheduler / worker enabled flag / DB connectivity."
+
+      # Too many "couldn't claim" conflicts can indicate contention or a bug
+      - alert: DtpClaimConflictsHigh
+        expr: rate(dtp_tasks_claim_conflicts_total[5m]) > 2
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High task claim conflict rate"
+          description: "Claim conflicts > 2/sec for 10m. Possible multi-worker contention, slow processing, or overly broad eligibility query."
+
+      # Mark-failed should be very reliable; errors here mean retry state may not persist
+      - alert: DtpMarkFailedErrors
+        expr: rate(dtp_tasks_mark_failed_errors_total[5m]) > 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Errors while persisting failure / retry state"
+          description: "markFailed errors detected. Retry state may not be persisted; inspect logs around task_markFailed_failed."
+
+  - name: dtp-tasks
+    rules:
+      # Failure rate too high relative to successes
+      - alert: DtpTaskFailureRateHigh
+        expr: |
+          (
+            rate(dtp_tasks_failed_total[10m])
+            /
+            clamp_min(rate(dtp_tasks_succeeded_total[10m]), 0.01)
+          ) > 2
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High failure-to-success ratio"
+          description: "Failed-to-succeeded ratio > 2 for 10m. Likely downstream dependency issues or logic bug."
+
+      # Processing latency p95 too high (uses histogram buckets)
+      - alert: DtpTaskProcessingLatencyP95High
+        expr: |
+          histogram_quantile(
+            0.95,
+            sum by (le) (rate(dtp_task_processing_duration_seconds_bucket[5m]))
+          ) > 5
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High task processing latency (p95)"
+          description: "p95 processing duration > 5s for 10m. Worker may be slow or blocked."
+
+      # Processing latency p99 extremely high
+      - alert: DtpTaskProcessingLatencyP99Critical
+        expr: |
+          histogram_quantile(
+            0.99,
+            sum by (le) (rate(dtp_task_processing_duration_seconds_bucket[5m]))
+          ) > 15
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Extreme task processing latency (p99)"
+          description: "p99 processing duration > 15s for 5m. Investigate worker threads, DB, or external calls."
+
+  - name: dtp-runtime
+    rules:
+      # JVM is up but might be overloaded / GC issues etc. (optional baseline)
+      - alert: DtpJvmGcOverheadHigh
+        expr: jvm_gc_overhead_percent > 0.2
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High GC overhead"
+          description: "GC overhead > 20% for 10m. Investigate memory pressure."
+
+      # Connection pool saturation (optional)
+      - alert: DtpHikariPoolSaturated
+        expr: (hikaricp_connections_active{pool="HikariPool-1"} / hikaricp_connections_max{pool="HikariPool-1"}) > 0.9
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Hikari pool near saturation"
+          description: "Active connections > 90% of max for 5m. DB may be slow or too many concurrent operations."
+
+
