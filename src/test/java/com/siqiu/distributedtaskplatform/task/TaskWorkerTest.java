@@ -13,8 +13,10 @@ import java.time.Instant;
 import java.sql.Timestamp;
 
 
-
-@SpringBootTest
+@SpringBootTest(properties = {
+        "dtp.queue.mode=db",
+        "spring.task.scheduling.enabled=false"
+})
 @ActiveProfiles("test")
 class TaskWorkerTest {
 

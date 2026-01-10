@@ -16,7 +16,8 @@ class TaskDomainTest {
         // simulate prior failure state
         t.setStatus(TaskStatus.FAILED);
 
-        t.markProcessing();
+        String workerId = "test-worker-1";
+        t.markProcessing(workerId);
 
         assertEquals(TaskStatus.PROCESSING, t.getStatus());
         assertEquals(1, t.getAttemptCount(), "attemptCount should increment when starting an attempt");
@@ -27,8 +28,9 @@ class TaskDomainTest {
     @Test
     void markFailed_schedulesRetry_whenAttemptsRemain() {
         Task t = new Task("email", "fail me");
-        t.setStatus(TaskStatus.PENDING);
-        t.markProcessing(); // attemptCount becomes 1
+        t.markEnqueued(Instant.now());
+        String workerId = "test-worker-1";
+        t.markProcessing(workerId); // attemptCount becomes 1
 
         Duration backoff = Duration.ofSeconds(2);
         Instant before = Instant.now();
@@ -48,20 +50,21 @@ class TaskDomainTest {
         Task t = new Task("email", "fail always");
         // maxAttempts defaults to 3 in DB; ensure the entity matches that
         // Run 3 processing attempts; the 4th failure should become DEAD depending on your exact rule.
+        String workerId = "test-worker-1";
 
         // Attempt 1
-        t.setStatus(TaskStatus.PENDING);
-        t.markProcessing(); // attemptCount 1
+        t.markEnqueued(Instant.now());
+        t.markProcessing(workerId); // attemptCount 1
         t.markFailed("boom1", Duration.ofSeconds(1)); // FAILED
 
         // Attempt 2
-        t.setStatus(TaskStatus.PENDING); // if your retry transitions go FAILED->PENDING elsewhere, adjust accordingly
-        t.markProcessing(); // attemptCount 2
+        t.markEnqueued(Instant.now());
+        t.markProcessing(workerId); // attemptCount 2
         t.markFailed("boom2", Duration.ofSeconds(1));
 
         // Attempt 3
-        t.setStatus(TaskStatus.PENDING);
-        t.markProcessing(); // attemptCount 3
+        t.markEnqueued(Instant.now());
+        t.markProcessing(workerId); // attemptCount 3
         t.markFailed("boom3", Duration.ofSeconds(1));
 
         // Now depending on your business rule:

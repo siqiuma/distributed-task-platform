@@ -5,11 +5,13 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.test.context.ActiveProfiles;
 
-import java.time.Instant;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-@SpringBootTest
+@SpringBootTest(properties = {
+        "dtp.queue.mode=db",
+        "spring.task.scheduling.enabled=false"
+})
 @ActiveProfiles("test")
 class TaskWorkerTxTest {
 

@@ -30,3 +30,16 @@ services:
       - --config.file=/etc/alertmanager/alertmanager.yml
     ports:
       - "9093:9093"
+
+  localstack:
+    image: localstack/localstack:latest
+    container_name: dtp-localstack
+    environment:
+      - SERVICES=sqs
+      - AWS_DEFAULT_REGION=us-east-1
+      - DEBUG=1
+    ports:
+      - "4566:4566"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./localstack/init:/etc/localstack/init

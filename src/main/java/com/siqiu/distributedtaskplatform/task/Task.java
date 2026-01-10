@@ -39,6 +39,19 @@ public class Task {
 
     @Column(name = "last_error", columnDefinition = "text")
     private String lastError;
+
+    // --- SQS / distributed execution fields ---
+    @Column(name = "scheduled_for")
+    private Instant scheduledFor;
+
+    @Column(name = "processing_started_at")
+    private Instant processingStartedAt;
+
+    @Column(name = "completed_at")
+    private Instant completedAt;
+
+    @Column(name = "worker_id")
+    private String workerId;
 /*JPA now does this behind the scenes:
 * Reads task with version = 1
 * On update, executes:
@@ -57,10 +70,16 @@ WHERE id=? AND version=1
         this.type = type;
         this.payload = payload;
         this.status = TaskStatus.PENDING;
-        this.createdAt = Instant.now();
-        this.updatedAt = Instant.now();
     }
 
+    @PrePersist
+    void onCreate() {
+        Instant now = Instant.now();
+        this.createdAt = now;
+        this.updatedAt = now;
+
+        if (this.scheduledFor == null) this.scheduledFor = now;
+    }
     @PreUpdate
     void onUpdate() {
         this.updatedAt = Instant.now();
@@ -80,7 +99,25 @@ WHERE id=? AND version=1
     public void setStatus(TaskStatus status) {
         this.status = status;
     }
+    public Instant getScheduledFor() {
+        return scheduledFor;
+    }
 
+    public Instant getProcessingStartedAt() {
+        return processingStartedAt;
+    }
+
+    public Instant getCompletedAt() {
+        return completedAt;
+    }
+
+    public String getWorkerId() {
+        return workerId;
+    }
+
+    public void setScheduledFor(Instant scheduledFor) {
+        this.scheduledFor = scheduledFor;
+    }
     public void cancel() {
         if (this.status != TaskStatus.PENDING) {
             throw new InvalidTaskStateException(
@@ -90,8 +127,22 @@ WHERE id=? AND version=1
         this.status = TaskStatus.CANCELED;
     }
 
-    public void markProcessing() {
+    /** Call this right after successfully sending the SQS message */
+    public void markEnqueued(Instant scheduledFor) {
         if (this.status != TaskStatus.PENDING && this.status != TaskStatus.FAILED) {
+            throw new InvalidTaskStateException("Cannot enqueue task in state " + status);
+        }
+        if (this.attemptCount >= this.maxAttempts) {
+            throw new InvalidTaskStateException("Cannot enqueue task; max attempts reached");
+        }
+        this.status = TaskStatus.ENQUEUED;   // add this enum
+        this.scheduledFor = scheduledFor;
+        this.workerId = null;
+        this.processingStartedAt = null;
+    }
+
+    public void markProcessing(String workerId) {
+        if (this.status != TaskStatus.ENQUEUED && this.status != TaskStatus.FAILED) {
             throw new InvalidTaskStateException(
                     "Cannot process task in state " + status
             );
@@ -105,6 +156,9 @@ WHERE id=? AND version=1
         this.lastError = null;
         this.nextRunAt = null;
 
+        this.workerId = workerId;
+        this.processingStartedAt = Instant.now();
+
         this.status = TaskStatus.PROCESSING;
     }
 
@@ -115,6 +169,7 @@ WHERE id=? AND version=1
             );
         }
         this.status = TaskStatus.SUCCEEDED;
+        this.completedAt = Instant.now();
     }
 
     public void markFailed(String errorMessage, Duration backoff) {
@@ -139,6 +194,7 @@ WHERE id=? AND version=1
             this.status = TaskStatus.DEAD;
             this.nextRunAt = null;
         }
+        this.completedAt = Instant.now(); // optional: record terminal time of this attempt
     }
 
 }

@@ -1,0 +1,17 @@
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus
+
+dtp:
+  sqs:
+    endpoint: ${AWS_ENDPOINT_URL:http://localhost:4566}
+    region: ${AWS_REGION:us-east-1}
+    queueName: ${DTP_SQS_QUEUE_NAME:dtp-task-queue}
+  queue:
+    mode: sqs
+
+aws:
+  region: ${AWS_REGION:us-east-1}
+  endpointUrl: ${AWS_ENDPOINT_URL:http://localhost:4566}

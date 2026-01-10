@@ -1,5 +1,6 @@
 package com.siqiu.distributedtaskplatform.task;
 
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.stereotype.Service;
 
@@ -7,6 +8,7 @@ import java.time.Duration;
 import java.time.Instant;
 
 @Service
+@ConditionalOnProperty(name = "dtp.queue.mode", havingValue = "db", matchIfMissing = true)
 public class TaskWorkerTx {
     private final TaskRepository repository;
 

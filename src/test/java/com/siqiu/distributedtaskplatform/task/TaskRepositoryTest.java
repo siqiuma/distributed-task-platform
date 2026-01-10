@@ -65,8 +65,14 @@ class TaskRepositoryTest {
         Task t = new Task("email", "will-fail");
         repository.saveAndFlush(t);
 
+        // Must enqueue before processing
+        t.markEnqueued(Instant.now());
+        repository.saveAndFlush(t);
+
+        String workerId = "test-worker-1";
+
         // move it through domain transitions
-        t.markProcessing();
+        t.markProcessing(workerId);
         t.markFailed("boom", backoff);
 
         return repository.saveAndFlush(t);
@@ -89,18 +95,28 @@ class TaskRepositoryTest {
         Task t = new Task("email", "always-fail");
         repository.saveAndFlush(t);
 
+        String workerId = "test-worker-1";
         // attempt 1
-        t.markProcessing();
+        t.markEnqueued(now);
+        repository.saveAndFlush(t);
+
+        t.markProcessing(workerId);
         t.markFailed("boom1", Duration.ZERO);
         repository.saveAndFlush(t);
 
         // attempt 2
-        t.markProcessing();
+        t.markEnqueued(now);
+        repository.saveAndFlush(t);
+
+        t.markProcessing(workerId);
         t.markFailed("boom2", Duration.ZERO);
         repository.saveAndFlush(t);
 
         // attempt 3 -> should become DEAD depending on your logic
-        t.markProcessing();
+        t.markEnqueued(now);
+        repository.saveAndFlush(t);
+
+        t.markProcessing(workerId);
         t.markFailed("boom3", Duration.ZERO);
 
         return repository.saveAndFlush(t);

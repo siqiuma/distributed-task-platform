@@ -1,5 +1,6 @@
 package com.siqiu.distributedtaskplatform.task;
 
+import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
@@ -7,8 +8,19 @@ import org.springframework.data.repository.query.Param;
 
 import java.time.Instant;
 import java.util.List;
+import java.util.Optional;
+
 
 public interface TaskRepository extends JpaRepository<Task, Long> {
+    // =========================
+    // DB MODE (polling) queries
+    // =========================
+
+    /**
+     * Claim a task for DB-mode worker (PENDING/FAILED that are due).
+     * Returns number of updated rows (1 = claimed, 0 = someone else got it or not due).
+     */
+
     //It tells Spring Data that the query performs an update or delete instead of a select,
     // so it executes it as a modifying query and returns the affected row count
     @Modifying(clearAutomatically = true, flushAutomatically = true)

@@ -16,6 +16,12 @@ public class TaskResponse {
     private Instant createdAt;
     private Instant updatedAt;
 
+    // Queue/execution timeline
+    private Instant scheduledFor;
+    private Instant processingStartedAt;
+    private Instant completedAt;
+    private String workerId;
+
     // Retry / execution fields
     public Integer attemptCount;
     public Integer maxAttempts;
@@ -33,6 +39,11 @@ public class TaskResponse {
         r.createdAt = task.getCreatedAt();
         r.updatedAt = task.getUpdatedAt();
 
+        r.scheduledFor = task.getScheduledFor();
+        r.processingStartedAt = task.getProcessingStartedAt();
+        r.completedAt = task.getCompletedAt();
+        r.workerId = task.getWorkerId();
+
         r.attemptCount = task.getAttemptCount();
         r.maxAttempts = task.getMaxAttempts();
         r.nextRunAt = task.getNextRunAt();
@@ -49,8 +60,9 @@ public class TaskResponse {
         if (t.getStatus() == TaskStatus.CANCELED) return "CANCELED";
         if (t.getStatus() == TaskStatus.DEAD) return "DEAD (no retries)";
         if (t.getStatus() == TaskStatus.PROCESSING) return "IN_PROGRESS";
+        if (t.getStatus() == TaskStatus.ENQUEUED) return "QUEUED";
 
-        if (t.getStatus() == TaskStatus.PENDING) return "READY_TO_PROCESS";
+        if (t.getStatus() == TaskStatus.PENDING) return "READY_TO_PROCESS/NOT_QUEUED";
 
         if (t.getStatus() == TaskStatus.FAILED) {
             // FAILED is retryable by definition in our model

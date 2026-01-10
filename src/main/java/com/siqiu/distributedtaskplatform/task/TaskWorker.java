@@ -15,7 +15,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 @Component
-@ConditionalOnProperty(name = "task.worker.enabled", havingValue = "true", matchIfMissing = true)
+@ConditionalOnProperty(name = "dtp.queue.mode", havingValue = "db", matchIfMissing = true)
 public class TaskWorker {
     private static final Logger log = LoggerFactory.getLogger(TaskWorker.class);
 
@@ -109,6 +109,7 @@ public class TaskWorker {
                         java.time.Duration.between(startedAt, Instant.now()).toMillis());
 
             } catch (org.springframework.orm.ObjectOptimisticLockingFailureException e) {
+                claimConflicts.increment();
                 log.warn("task_conflict_optimistic_lock id={} phase=processing durationMs={}",
                         id, java.time.Duration.between(startedAt, Instant.now()).toMillis());
             } catch (InterruptedException e) {

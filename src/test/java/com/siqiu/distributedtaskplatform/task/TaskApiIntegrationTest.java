@@ -20,7 +20,10 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultHandlers.print;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 
-@SpringBootTest(classes = {DistributedTaskPlatformApplication.class, TestcontainersConfig.class})
+@SpringBootTest(classes = {DistributedTaskPlatformApplication.class, TestcontainersConfig.class}, properties = {
+        "dtp.queue.mode=db",
+        "spring.task.scheduling.enabled=false"
+})
 @AutoConfigureMockMvc
 @AutoConfigureTestDatabase(replace = NONE)  // IMPORTANT: do not switch to H2
 @Import(TestcontainersConfig.class)
