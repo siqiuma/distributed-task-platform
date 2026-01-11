@@ -14,6 +14,9 @@ public class TaskClaimRepository {
     public TaskClaimRepository(JdbcTemplate jdbc) {
         this.jdbc = jdbc;
     }
+
+    public record FailOutcome(boolean updated, boolean becameDead, int attemptCount, int maxAttempts) {}
+
     // =========================
     // SQS MODE (queue) queries
     // =========================
@@ -105,5 +108,44 @@ public class TaskClaimRepository {
             return ts == null ? Optional.empty() : Optional.of(ts.toInstant());
         }, taskId);
     }
+
+    public FailOutcome markFailedAndRescheduleOutcome(long taskId, String workerId, String errorMsg, long backoffSeconds) {
+        String sql = """
+        UPDATE tasks
+           SET status =
+                 CASE
+                   WHEN attempt_count >= max_attempts THEN 'DEAD'
+                   ELSE 'ENQUEUED'
+                 END,
+               last_error = ?,
+               scheduled_for =
+                 CASE
+                   WHEN attempt_count >= max_attempts THEN NULL
+                   ELSE now() + (? * interval '1 second')
+                 END,
+               completed_at =
+                 CASE
+                   WHEN attempt_count >= max_attempts THEN now()
+                   ELSE NULL
+                 END,
+               updated_at = now(),
+               processing_started_at = NULL,
+               worker_id = NULL,
+               next_run_at = NULL
+         WHERE id = ?
+           AND status = 'PROCESSING'
+           AND worker_id = ?
+        RETURNING status, attempt_count, max_attempts
+        """;
+
+        return jdbc.query(sql, rs -> {
+            if (!rs.next()) return new FailOutcome(false, false, 0, 0);
+            String status = rs.getString("status");
+            int attempt = rs.getInt("attempt_count");
+            int max = rs.getInt("max_attempts");
+            return new FailOutcome(true, "DEAD".equalsIgnoreCase(status), attempt, max);
+        }, errorMsg, backoffSeconds, taskId, workerId);
+    }
+
 }
 

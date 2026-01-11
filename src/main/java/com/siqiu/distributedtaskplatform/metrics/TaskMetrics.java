@@ -18,6 +18,8 @@ public class TaskMetrics {
     private final Counter tasksProcessed;
     private final Counter tasksSucceeded;
     private final Counter tasksFailed;
+    private final Counter tasksDeadLettered;
+
 
     public TaskMetrics(MeterRegistry registry) {
         this.scheduleLagTimer = Timer.builder("dtp_task_schedule_lag_seconds")
@@ -56,6 +58,10 @@ public class TaskMetrics {
         this.tasksFailed = Counter.builder("dtp_tasks_failed_total")
                 .description("Number of tasks failed")
                 .register(registry);
+
+        this.tasksDeadLettered = Counter.builder("dtp_tasks_dead_lettered_total")
+                .description("Number of tasks that became DEAD and were sent to DLQ")
+                .register(registry);
     }
 
     public void observeScheduleLag(Duration lag) {
@@ -70,4 +76,6 @@ public class TaskMetrics {
     public void incTasksProcessed() { tasksProcessed.increment(); }
     public void incTasksSucceeded() { tasksSucceeded.increment(); }
     public void incTasksFailed() { tasksFailed.increment(); }
+    public void incTasksDeadLettered() { tasksDeadLettered.increment(); }
+
 }

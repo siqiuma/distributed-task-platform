@@ -1,6 +1,8 @@
 package com.siqiu.distributedtaskplatform.config;
 
 import com.siqiu.distributedtaskplatform.metrics.TaskMetrics;
+import com.siqiu.distributedtaskplatform.queue.DeadLetterClient;
+import com.siqiu.distributedtaskplatform.queue.SqsDeadLetterClient;
 import com.siqiu.distributedtaskplatform.queue.SqsTaskQueueClient;
 import com.siqiu.distributedtaskplatform.queue.TaskQueueClient;
 import com.siqiu.distributedtaskplatform.repo.TaskClaimRepository;
@@ -35,6 +37,15 @@ public class QueueConfig {
             @Value("${dtp.sqs.queueName}") String queueName
     ) {
         return new SqsTaskQueueClient(sqsClient, queueName);
+    }
+
+    @Bean
+    public DeadLetterClient deadLetterClient(
+            SqsClient sqsClient,
+            @Value("${dtp.sqs.dlqName}") String dlqName,
+            com.fasterxml.jackson.databind.ObjectMapper mapper
+    ) {
+        return new SqsDeadLetterClient(sqsClient, dlqName, mapper);
     }
 
 }

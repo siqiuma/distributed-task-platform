@@ -1,6 +1,8 @@
 package com.siqiu.distributedtaskplatform.worker;
 
 import com.siqiu.distributedtaskplatform.metrics.TaskMetrics;
+import com.siqiu.distributedtaskplatform.queue.DeadLetterClient;
+import com.siqiu.distributedtaskplatform.queue.DeadTaskEvent;
 import com.siqiu.distributedtaskplatform.repo.TaskClaimRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -35,13 +37,19 @@ public class SqsWorkerLoop implements DisposableBean {
 
     private final boolean autoStart;
 
+    private final DeadLetterClient dlq;
+
+    private final TaskProcessor processor;
+
     public SqsWorkerLoop(
             SqsClient sqs,
             @Value("${dtp.sqs.queueName}") String queueName,
             TaskClaimRepository claimRepo,
             TaskMetrics metrics,
-            @Value("${dtp.sqs.worker.autostart:true}") boolean autoStart
-    ) {
+            @Value("${dtp.sqs.worker.autostart:true}") boolean autoStart,
+            DeadLetterClient dlq,
+            TaskProcessor processor
+            ) {
         this.sqs = sqs;
         this.queueUrl = sqs.getQueueUrl(GetQueueUrlRequest.builder()
                 .queueName(queueName)
@@ -49,6 +57,8 @@ public class SqsWorkerLoop implements DisposableBean {
         this.claimRepo = claimRepo;
         this.metrics = metrics;
         this.autoStart = autoStart;
+        this.dlq = dlq;
+        this.processor = processor;
 
         // Start background loop only if enabled
         if (this.autoStart) {
@@ -125,7 +135,7 @@ public class SqsWorkerLoop implements DisposableBean {
 
         // 3) Do the work + complete DB lifecycle
         try {
-            simulateWork(taskId);
+            processor.process(taskId);
             // Mark succeeded in DB
             boolean updated = claimRepo.markSucceeded(taskId, workerId);
             if (!updated) {
@@ -142,20 +152,52 @@ public class SqsWorkerLoop implements DisposableBean {
         } catch (Exception ex) {
             metrics.incTasksFailed();
             log.error("Task processing failed. taskId={}", taskId, ex);
-            // Record failure + reschedule in DB
-            boolean updated = claimRepo.markFailedAndReschedule(
+            var outcome = claimRepo.markFailedAndRescheduleOutcome(
                     taskId,
                     workerId,
                     ex.getMessage(),
                     backoffSeconds
             );
 
-            if (!updated) {
-                // If DB update didn't happen, do NOT delete message.
-                // Otherwise you'd lose the task without recording failure/reschedule.
-                log.warn("markFailedAndReschedule did not update row. Not deleting SQS message. taskId={} workerId={}", taskId, workerId);
+            if (!outcome.updated()) {
+                log.warn("markFailedAndRescheduleOutcome did not update row. Not deleting SQS message. taskId={} workerId={}",
+                        taskId, workerId);
                 return;
             }
+
+            // If DEAD, publish a dead-task event (best effort)
+            if (outcome.becameDead()) {
+                metrics.incTasksDeadLettered();
+                try {
+                    dlq.publishDeadTask(new DeadTaskEvent(
+                            taskId,
+                            workerId,
+                            outcome.attemptCount(),
+                            outcome.maxAttempts(),
+                            ex.getMessage(),
+                            Instant.now()
+                    ));
+                } catch (Exception dlqEx) {
+                    // IMPORTANT: still delete original message to avoid infinite redelivery
+                    log.error("Failed to publish to DLQ. Deleting original SQS message anyway to avoid poison-loop. taskId={}", taskId, dlqEx);
+                    // (optional) add a metric like metrics.incDlqPublishFailed();
+                }
+            }
+            // Implementation Before adding DLQ
+            // Record failure + reschedule in DB
+//            boolean updated = claimRepo.markFailedAndReschedule(
+//                    taskId,
+//                    workerId,
+//                    ex.getMessage(),
+//                    backoffSeconds
+//            );
+//
+//            if (!updated) {
+//                // If DB update didn't happen, do NOT delete message.
+//                // Otherwise you'd lose the task without recording failure/reschedule.
+//                log.warn("markFailedAndReschedule did not update row. Not deleting SQS message. taskId={} workerId={}", taskId, workerId);
+//                return;
+//            }
 
             // Delete only after DB succeeded
             deleteMessage(msg);
@@ -170,12 +212,6 @@ public class SqsWorkerLoop implements DisposableBean {
                 .receiptHandle(msg.receiptHandle())
                 .build());
         metrics.incDeleted();
-    }
-
-    protected void simulateWork(long taskId) {
-        // Replace with your real logic
-        sleepQuietly(50);
-        log.info("Processed taskId={} workerId={}", taskId, workerId);
     }
 
     private void sleepQuietly(long ms) {
