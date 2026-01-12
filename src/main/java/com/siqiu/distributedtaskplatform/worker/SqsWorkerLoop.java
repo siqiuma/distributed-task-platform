@@ -88,6 +88,7 @@ public class SqsWorkerLoop implements DisposableBean {
         log.info("SQS worker loop stopped. workerId={}", workerId);
     }
 
+    //If the queue is empty, don’t reply immediately — wait up to 20 seconds for messages.
     private List<Message> receiveMessages() {
         ReceiveMessageRequest req = ReceiveMessageRequest.builder()
                 .queueUrl(queueUrl)
@@ -230,8 +231,19 @@ public class SqsWorkerLoop implements DisposableBean {
 
     // for integration testing
     void runOnce() {
-        List<Message> messages = receiveMessages();
+        if (Thread.currentThread().isInterrupted()) return;
+
+        List<Message> messages;
+        try {
+            messages = receiveMessages();
+        } catch (software.amazon.awssdk.core.exception.AbortedException e) {
+            // happens if the thread gets interrupted while blocked in AWS SDK
+            Thread.currentThread().interrupt();
+            return;
+        }
+
         for (Message msg : messages) {
+            if (Thread.currentThread().isInterrupted()) return;
             metrics.incReceived();
             processMessage(msg);
         }
