@@ -39,6 +39,117 @@ TaskProcessor
 
 
 ---
+##Core Features
+-------------
+
+### 1\. Task Creation & Scheduling
+
+-   Create tasks with optional delayed execution (`scheduled_for`)
+
+-   Tasks are persisted immediately in PostgreSQL
+
+-   Supports future scheduling and retries
+
+**Why it matters:**\
+Guarantees tasks are never lost, even if the app crashes right after creation.
+
+* * * * *
+
+### 2\. Database-Backed Task Lifecycle
+
+Each task follows a strictly enforced lifecycle:
+PENDING → ENQUEUED → PROCESSING → SUCCEEDED
+
+                         ↓
+
+                       FAILED → ENQUEUED (retry)
+
+                         ↓
+
+                        DEAD
+
+-   State transitions are **atomic**
+
+-   Illegal transitions are prevented by SQL predicates
+
+-   Database is the **single source of truth**
+
+### 3\. Safe Task Enqueueing (DueTaskEnqueuer)
+
+-   Periodically scans for due tasks
+
+-   Claims tasks for enqueue using DB locks
+
+-   Sends task IDs to SQS
+
+-   Releases enqueue lock on failure
+
+**Guarantee:**\
+No task is enqueued twice, even if multiple enqueuers run.
+
+* * * * *
+
+### 4\. At-Least-Once Queue Delivery (SQS)
+
+-   Uses SQS standard queues
+
+-   Long polling enabled
+
+-   Visibility timeout configured
+
+-   Messages may be delivered more than once
+
+**Design choice:**\
+Delivery is at-least-once, correctness is enforced downstream.
+
+* * * * *
+
+### 5\. Exactly-Once Task Execution (Idempotency)
+
+-   Dedicated `task_idempotency` table
+
+-   First execution records success
+
+-   Retries are safely ignored
+
+**Guarantee:**\
+Side effects occur exactly once, even under retries and crashes.
+
+* * * * *
+
+### 6\. Safe Concurrent Processing (Horizontal Scaling)
+
+-   Multiple worker instances can run concurrently
+
+-   Workers compete to claim tasks via atomic SQL updates
+
+-   Only one worker can own a task at a time
+
+**No distributed locks, no coordination service required.**
+
+* * * * *
+
+### 7\. Failure Handling & Retries
+
+-   Automatic retry with backoff
+
+-   Attempts tracked in DB
+
+-   Rescheduled tasks re-enter the queue
+
+-   Retries stop at `max_attempts`
+
+* * * * *
+
+### 8\. Dead Letter Queue (DLQ)
+
+-   Tasks exceeding `max_attempts` are marked `DEAD`
+
+-   Dead task metadata is published to a DLQ
+
+-   Original SQS message is deleted to prevent poison loops
+
+**DLQ publishing is best-effort, system correctness is preserved regardless.**
 
 ## Core Design Principles
 
@@ -253,12 +364,30 @@ PENDING → CANCELED
 
 ### Create a task
 POST /tasks
+If `scheduledFor` is omitted:
+
+-   Task is eligible for immediate enqueue
+
+-   Will be picked up by the next enqueuer tick
 ### Get task by ID
 GET /tasks/{id}
 ### Cancel a task
 PUT /tasks/{id}/cancel
+
+### Internal (Non-Public) Worker APIs
+
+These are **not exposed externally**, but are core system components:
+
+| Component | Responsibility |
+| --- | --- |
+| `DueTaskEnqueuer` | Claims due tasks and sends to SQS |
+| `SqsWorkerLoop` | Receives messages and processes tasks |
+| `TaskProcessor` | Executes task logic |
+| `TaskClaimRepository` | Enforces task ownership |
+| `TaskIdempotencyRepository` | Ensures exactly-once effects |
+
 ## How to Run Locally
 
 ```bash
-./mvnw spring-boot:run
+./mvnw spring-boot:run -Dspring-boot.run.profiles=postgres
 ```
